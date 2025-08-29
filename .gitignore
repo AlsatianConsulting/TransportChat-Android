@@ -1,0 +1,37 @@
+# Android/Gradle
+.gradle/
+build/
+*/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.idea/**
+
+# Signing / secrets
+*.keystore
+*.jks
+keystore.properties
+signing.properties
+**/google-services.json
+*.pem
+*.p12
+*.key
+*.crt
+.env
+.env.*
+secrets*.json
+secrets*.xml
+
+# Logs & outputs
+*.log
+*.apk
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db
