@@ -143,11 +143,56 @@ These are typically required:
 
 ## FAQ
 
-**Q: Are names I set in the app permanent?**  
-A: No. Renames are **session-only** — they’re cleared when the app is closed.
+# Transport Chat — Quick FAQ
 
-**Q: Is internet required?**  
-A: No — this is LAN-only. Both devices must be on the same network.
+**What is Transport Chat?**  
+A local-network, end-to-end encrypted chat and file-sharing app for phones and desktops. It works entirely on the **same LAN**—no server, no internet.
+
+**Does it need the internet?**  
+No. It runs over local Wi-Fi/Ethernet/hotspot. If the internet is slow or down, Transport Chat still works.
+
+**How do peers find each other?**  
+Automatic discovery via mDNS/NSD on the local subnet. If that’s blocked, you can manually add a peer by IP/port.
+
+**What ports/protocols does it use?**  
+TCP on port **7777** by default, plus multicast DNS for discovery.
+
+**Is it encrypted?**  
+Yes—messages and file transfers are end-to-end encrypted directly between devices.
+
+**Does the app store my messages?**  
+**No.** Messages are **not stored**. When you close the app, the entire chat history disappears.
+
+**What about file transfers?**  
+Files are sent directly over your LAN. Received files are saved to your device’s storage, but **messages themselves are not saved**.
+
+**Do renamed peers persist?**  
+No—renames are a local convenience and **reset when the app closes**.
+
+**What platforms are supported?**  
+Android and desktop (Windows/macOS/Linux). Cross-platform chats work as long as devices share a LAN.
+
+**Will it work across different subnets or VLANs?**  
+Auto-discovery usually won’t cross subnets. If routing allows, you can still connect by manually entering the peer’s IP.
+
+**What about captive portals or guest Wi-Fi?**  
+Some networks use “client isolation,” blocking device-to-device traffic. If that happens, create your own LAN (e.g., a travel router or personal hotspot) and have everyone join it.
+
+**Use case: Cruises & flights**  
+- **Cruises:** Ship internet is often pricey/slow. If your group is on the same LAN (or your own travel router’s LAN), you can chat and share files **without buying internet**. If the ship’s Wi-Fi isolates clients, a small travel router creates your own private LAN.  
+- **Flights:** Many in-flight systems block passenger-to-passenger traffic, so peers won’t appear on the airline network. Some groups prep a **battery-powered travel router** before boarding; everyone joins that network in airplane mode with Wi-Fi on. Always follow airline rules—personal hotspots may be restricted.
+
+**How far does it reach?**  
+Whatever your LAN provides. A travel router often improves range and stability.
+
+**Any setup tips?**  
+- Put all devices on the same SSID (your own travel router is ideal).  
+- If discovery fails, connect by IP.  
+- Disable client isolation on *your* router (can’t change this on public/guest networks).  
+- Keep screens awake during big file sends if your OS is aggressive about sleep.
+
+**Is this legal to use everywhere?**  
+It’s just local networking, but **follow venue policies** (airlines/ships may restrict hotspots) and local regulations.
 
 
 ---
