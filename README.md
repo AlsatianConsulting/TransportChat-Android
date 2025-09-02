@@ -23,6 +23,7 @@ TransportChat is a lightweight, **local-network-only** chat and file transfer ap
 - [Permissions](#permissions)
 - [How It Works](#how-it-works)
 - [Privacy & Security](#privacy--security)
+- [Screenshots](#screenshots)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
 - [License](#license)
@@ -120,6 +121,14 @@ These are typically required:
 - **Ephemeral labels** — renamed titles are not persisted and vanish after app restart.
 
 > Use on **trusted** LANs. While sessions are encrypted, network operators can observe connection metadata typical to LAN apps.
+
+---
+## Screenshots
+**Main Screen**
+<img width="864" height="1872" alt="Screenshot_20250902-112904" src="https://github.com/user-attachments/assets/97a13245-2cd6-4920-8825-cccd3944de07" />
+
+**Chat Screen**
+<img width="864" height="1872" alt="Screenshot_20250902-113842" src="https://github.com/user-attachments/assets/3fa93b4a-1563-4545-8415-be9eb6c29935" />
 
 ---
 
