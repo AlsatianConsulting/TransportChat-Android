@@ -10,6 +10,7 @@ import dev.alsatianconsulting.transportchat.data.ChatStore
 import dev.alsatianconsulting.transportchat.data.TransferCenter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -17,7 +18,11 @@ import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
+import java.io.File
+import android.webkit.MimeTypeMap
 
 object ChatClient {
     private const val TAG = "ChatClient"
@@ -121,25 +126,86 @@ object ChatClient {
 
         // Stream encrypted chunks
         io.wr.write("DATA\n"); io.wr.flush()
-        var sent = 0L
-        val buf = ByteArray(128 * 1024)
-        cr.openInputStream(uri)?.use { input ->
-            while (true) {
-                val n = input.read(buf)
-                if (n <= 0) break
-                val chunk = buf.copyOf(n)
-                val b64 = ChatCrypto.encryptToB64(io.ses, chunk)
-                io.wr.write("CHUNK\n")
-                io.wr.write(b64 + "\n")
-                io.wr.flush()
-                sent += n
-                TransferCenter.progress(id, sent)
-            }
+        io.s.soTimeout = 30_000 // allow cancel/idle detection while uploading
+
+        // Background reader to detect receiver CANCEL immediately
+        val peerCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val readerJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            try {
+                while (true) {
+                    val tag = try { io.br.readLine() } catch (_: java.net.SocketTimeoutException) { continue } ?: break
+                    when (tag) {
+                        "CANCEL" -> { peerCancelled.set(true); break }
+                        "ENC" -> {
+                            val b64 = io.br.readLine() ?: break
+                            runCatching { ChatCrypto.decryptFromB64(io.ses, b64) }
+                        }
+                        else -> { /* ignore */ }
+                    }
+                }
+            } catch (_: Throwable) { /* socket closed or benign */ }
         }
-        io.wr.write("END\n"); io.wr.flush()
-        io.s.close()
-        TransferCenter.finishedOutgoing(id)
-        Log.d(TAG, "File sent and socket closed")
+
+        try {
+            var sent = 0L
+            val buf = ByteArray(128 * 1024)
+            cr.openInputStream(uri)?.use { input ->
+                while (true) {
+                    if (dev.alsatianconsulting.transportchat.data.TransferCenter.isCancelled(id) || peerCancelled.get()) {
+                        runCatching { io.wr.write("CANCEL\n"); io.wr.flush() }
+                        TransferCenter.cancelled(id)
+                        runCatching { io.s.close() }
+                        return@withContext
+                    }
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    val chunk = buf.copyOf(n)
+                    val b64 = ChatCrypto.encryptToB64(io.ses, chunk)
+                    try {
+                        io.wr.write("CHUNK\n")
+                        io.wr.write(b64 + "\n")
+                        io.wr.flush()
+                    } catch (t: Throwable) {
+                        if (peerCancelled.get() || dev.alsatianconsulting.transportchat.data.TransferCenter.isCancelled(id)) {
+                            TransferCenter.cancelled(id)
+                            runCatching { io.s.close() }
+                            return@withContext
+                        } else {
+                            throw t
+                        }
+                    }
+                    sent += n
+                    TransferCenter.progress(id, sent)
+
+                    if (dev.alsatianconsulting.transportchat.data.TransferCenter.isCancelled(id) || peerCancelled.get()) {
+                        runCatching { io.wr.write("CANCEL\n"); io.wr.flush() }
+                        TransferCenter.cancelled(id)
+                        runCatching { io.s.close() }
+                        return@withContext
+                    }
+                }
+            }
+
+            if (peerCancelled.get()) {
+                TransferCenter.cancelled(id)
+                runCatching { io.s.close() }
+                return@withContext
+            }
+
+            io.wr.write("END\n"); io.wr.flush()
+            io.s.close()
+            TransferCenter.finishedOutgoing(id)
+            Log.d(TAG, "File sent and socket closed")
+        } catch (t: Throwable) {
+            if (peerCancelled.get() || dev.alsatianconsulting.transportchat.data.TransferCenter.isCancelled(id)) {
+                TransferCenter.cancelled(id)
+            } else {
+                TransferCenter.failed(id, t.message ?: "send error")
+            }
+        } finally {
+            readerJob.cancel()
+            runCatching { io.s.close() }
+        }
     }
 
     private fun queryFileMeta(cr: ContentResolver, uri: Uri): Triple<String?, Long?, String?> {
@@ -151,7 +217,26 @@ object ChatClient {
                 if (!c.isNull(1)) size = c.getLong(1)
             }
         }
-        val mime = cr.getType(uri)
+        var mime: String? = cr.getType(uri)
+
+        // Fallbacks for file:// URIs (Sharesheet cache etc.) — avoid lambdas to prevent smart-cast issues
+        if ((size ?: 0L) <= 0L && "file".equals(uri.scheme, ignoreCase = true)) {
+            val path = uri.path
+            if (path != null) {
+                val f = File(path)
+                if (f.exists()) {
+                    size = f.length()
+                }
+                if (mime.isNullOrBlank()) {
+                    val ext = f.extension.takeIf { it.isNotBlank() } ?: name?.substringAfterLast('.', "")
+                    if (!ext.isNullOrBlank()) {
+                        mime = MimeTypeMap.getSingleton()
+                            .getMimeTypeFromExtension(ext.lowercase())
+                    }
+                }
+            }
+        }
+
         if (name == null) {
             name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
         }

@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 enum class TransferDirection { OUTGOING, INCOMING }
-enum class TransferStatus { WAITING, TRANSFERRING, DONE, FAILED, REJECTED }
+enum class TransferStatus { WAITING, TRANSFERRING, DONE, FAILED, REJECTED, CANCELLED }
 
 data class TransferSnapshot(
     val id: String,
@@ -19,56 +19,117 @@ data class TransferSnapshot(
     val size: Long,
     val bytes: Long,
     val status: TransferStatus,
+    val error: String? = null,
     val savedTo: Uri? = null,
-    val error: String? = null
+    // NEW: stable timestamp used to interleave with chat messages
+    val createdAt: Long = System.currentTimeMillis(),
+    // NEW: completion timestamp for “X in Y” wording
+    val finishedAt: Long? = null
 )
 
 object TransferCenter {
     private val _snapshots = MutableStateFlow<Map<String, TransferSnapshot>>(emptyMap())
-    val snapshots: StateFlow<Map<String, TransferSnapshot>> = _snapshots
+    val snapshots: StateFlow<Map<String, TransferSnapshot>> get() = _snapshots
 
     fun newId(): String = UUID.randomUUID().toString()
 
-    fun startIncoming(id: String, host: String, port: Int, name: String, mime: String?, size: Long) {
-        _snapshots.update { it + (id to TransferSnapshot(id, TransferDirection.INCOMING, host, port, name, mime, size, 0L, TransferStatus.WAITING)) }
-    }
-
     fun startOutgoing(id: String, host: String, port: Int, name: String, mime: String?, size: Long) {
-        _snapshots.update { it + (id to TransferSnapshot(id, TransferDirection.OUTGOING, host, port, name, mime, size, 0L, TransferStatus.TRANSFERRING)) }
-    }
-
-    fun progress(id: String, bytesSoFar: Long) {
+        val now = System.currentTimeMillis()
         _snapshots.update {
-            val s = it[id] ?: return
-            it + (id to s.copy(bytes = bytesSoFar, status = TransferStatus.TRANSFERRING))
+            it + (id to TransferSnapshot(
+                id = id,
+                direction = TransferDirection.OUTGOING,
+                host = host,
+                port = port,
+                name = name,
+                mime = mime,
+                size = size,
+                bytes = 0L,
+                status = TransferStatus.WAITING,
+                createdAt = now
+            ))
         }
     }
 
-    fun finishedIncoming(id: String, savedTo: Uri) {
+    fun startIncoming(id: String, host: String, port: Int, name: String, mime: String?, size: Long) {
+        val now = System.currentTimeMillis()
         _snapshots.update {
-            val s = it[id] ?: return
-            it + (id to s.copy(bytes = s.size, status = TransferStatus.DONE, savedTo = savedTo))
+            it + (id to TransferSnapshot(
+                id = id,
+                direction = TransferDirection.INCOMING,
+                host = host,
+                port = port,
+                name = name,
+                mime = mime,
+                size = size,
+                bytes = 0L,
+                status = TransferStatus.WAITING,
+                createdAt = now
+            ))
+        }
+    }
+
+    fun progress(id: String, bytes: Long) {
+        _snapshots.update {
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(bytes = bytes, status = TransferStatus.TRANSFERRING))
         }
     }
 
     fun finishedOutgoing(id: String) {
         _snapshots.update {
-            val s = it[id] ?: return
-            it + (id to s.copy(bytes = s.size, status = TransferStatus.DONE))
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.DONE, finishedAt = System.currentTimeMillis()))
         }
     }
 
-    fun failed(id: String, message: String?) {
+    fun finishedIncoming(id: String, savedTo: Uri?) {
         _snapshots.update {
-            val s = it[id] ?: return
-            it + (id to s.copy(status = TransferStatus.FAILED, error = message))
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.DONE, savedTo = savedTo, finishedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun failed(id: String, reason: String?) {
+        _snapshots.update {
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.FAILED, error = reason, finishedAt = System.currentTimeMillis()))
         }
     }
 
     fun rejected(id: String) {
         _snapshots.update {
-            val s = it[id] ?: return
-            it + (id to s.copy(status = TransferStatus.REJECTED))
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.REJECTED, finishedAt = System.currentTimeMillis()))
         }
+    }
+
+    // --- Cancellation support (already present in your build) ---
+    private val _cancelFlags = mutableSetOf<String>()
+
+    @Synchronized
+    fun requestCancel(id: String) {
+        _cancelFlags.add(id)
+        // reflect cancelled state in UI immediately
+        _snapshots.update {
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.CANCELLED, finishedAt = System.currentTimeMillis()))
+        }
+    }
+
+    @Synchronized
+    fun isCancelled(id: String): Boolean = _cancelFlags.contains(id)
+
+    @Synchronized
+    fun clearCancel(id: String) {
+        _cancelFlags.remove(id)
+    }
+
+    fun cancelled(id: String) {
+        _snapshots.update {
+            val s = it[id] ?: return@update it
+            it + (id to s.copy(status = TransferStatus.CANCELLED, finishedAt = System.currentTimeMillis()))
+        }
+        clearCancel(id)
     }
 }

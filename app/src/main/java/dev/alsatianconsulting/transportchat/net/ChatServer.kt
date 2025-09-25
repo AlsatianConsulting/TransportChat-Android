@@ -16,40 +16,35 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.concurrent.thread
 
-// NEW: imports for blocklist checks
-import dev.alsatianconsulting.transportchat.store.PeerStore
-import kotlinx.coroutines.runBlocking
-
-data class IncomingText(
-    val id: String,
-    val remoteHost: String,
-    val localPort: Int,
-    val text: String
-)
-
-data class IncomingFileOffer(
-    val id: String,
-    val remoteHost: String,
-    val localPort: Int,
-    val name: String,
-    val mime: String?,
-    val size: Long
-)
-
-// NEW: normalize host (strip IPv6 scope like %wlan0)
+// normalize host (strip IPv6 scope like %wlan0)
 private fun normalizeHost(host: String?): String? = host?.substringBefore('%')
 
 object ChatServer {
+
     private const val TAG = "ChatServer"
 
     private lateinit var appCtx: Context
-    private var serverPort: Int = 7777
     private var server: ServerSocket? = null
+    private var serverPort: Int = 7777
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    data class IncomingText(
+        val id: String,
+        val remoteHost: String,
+        val localPort: Int,
+        val text: String
+    )
+
+    data class IncomingFileOffer(
+        val id: String,
+        val remoteHost: String,
+        val localPort: Int,
+        val name: String,
+        val mime: String?,
+        val size: Long
+    )
 
     private val _incomingMessages = MutableSharedFlow<IncomingText>(
         replay = 0, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -57,7 +52,7 @@ object ChatServer {
     val incomingMessages: SharedFlow<IncomingText> = _incomingMessages
 
     private val _incomingFileOffers = MutableSharedFlow<IncomingFileOffer>(
-        replay = 0, extraBufferCapacity = 32, onBufferOverflow = BufferOverflow.DROP_OLDEST
+        replay = 0, extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val incomingFileOffers: SharedFlow<IncomingFileOffer> = _incomingFileOffers
 
@@ -70,31 +65,31 @@ object ChatServer {
         val mime: String?,
         val size: Long
     )
-
     private val pending = ConcurrentHashMap<String, PendingConn>()
+
+    // Active connections (in-progress receives) so we can cancel from UI
+    private val active = ConcurrentHashMap<String, PendingConn>()
 
     fun init(context: Context) {
         appCtx = context.applicationContext
-        // Generate our ephemeral keypair now
-        ChatCrypto.publicB64 // triggers ensureKeys()
     }
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     fun start(port: Int) {
-        if (::appCtx.isInitialized.not()) return
-        if (serverPort == port && server?.isClosed == false) return
+        if (serverPort == port && server != null && !server!!.isClosed) return
         stop()
         serverPort = port
-        thread(name = "tcp-listener-$port") {
+        scope.launch {
             try {
-                val srv = ServerSocket(port)
-                server = srv
-                Log.d(TAG, "Listening on $port")
-                while (!srv.isClosed) {
-                    val s = srv.accept()
-                    handle(s)
+                server = ServerSocket(serverPort)
+                Log.i(TAG, "Listening on $serverPort")
+                while (!server!!.isClosed) {
+                    val socket = server!!.accept()
+                    handle(socket)
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "Listener stopped: ${t.message}")
+                Log.w(TAG, "Server stopped: ${t.message}")
             }
         }
     }
@@ -104,21 +99,15 @@ object ChatServer {
         server = null
     }
 
-    // ===== Connection handling with handshake =====
     private fun handle(socket: Socket) {
         socket.tcpNoDelay = true
         socket.soTimeout = 0
         scope.launch {
             try {
-                // NEW: EARLY BLOCK CHECK — before handshake or any read/write
                 val remoteHost = normalizeHost(socket.inetAddress?.hostAddress)
                 val localPort = serverPort
-                if (remoteHost == null) {
-                    runCatching { socket.close() }
-                    return@launch
-                }
-                val blocked = runBlocking { PeerStore(appCtx).isBlocked(remoteHost, localPort) }
-                if (blocked) {
+                if (remoteHost == null) { runCatching { socket.close() }; return@launch }
+                if (dev.alsatianconsulting.transportchat.store.PeerStore(appCtx).isBlocked(remoteHost, localPort)) {
                     Log.i(TAG, "Blocked connection from $remoteHost:$localPort — closing")
                     runCatching { socket.close() }
                     return@launch
@@ -127,14 +116,12 @@ object ChatServer {
                 val br = BufferedReader(InputStreamReader(socket.getInputStream()))
                 val wr = OutputStreamWriter(socket.getOutputStream())
 
-                // Handshake
                 val hello = br.readLine()
                 if (hello != "HELLO") { socket.close(); return@launch }
                 val peerPub = br.readLine() ?: run { socket.close(); return@launch }
                 wr.write("WELCOME\n"); wr.write(ChatCrypto.publicB64 + "\n"); wr.flush()
                 val session = ChatCrypto.deriveSession(peerPub)
 
-                // First encrypted command
                 val tag = br.readLine() ?: run { socket.close(); return@launch }
                 if (tag != "ENC") { socket.close(); return@launch }
                 val b64 = br.readLine() ?: run { socket.close(); return@launch }
@@ -143,20 +130,13 @@ object ChatServer {
                     "TEXT" -> {
                         val id = obj.optString("id")
                         val body = obj.optString("body")
-                        val host = normalizeHost(socket.inetAddress?.hostAddress) ?: "?"
-
-                        // NEW: DEFENSIVE BLOCK CHECK — if block toggled mid-session, drop without ack
-                        val stillBlocked = runBlocking { PeerStore(appCtx).isBlocked(host, serverPort) }
-                        if (stillBlocked) {
-                            Log.i(TAG, "Blocked mid-text from $host:$serverPort — dropping without ack")
-                            runCatching { socket.close() }
-                            return@launch
-                        }
-
-                        _incomingMessages.emit(IncomingText(id, host, serverPort, body))
-
-                        // delivery ack (encrypted)
-                        val ack = JSONObject().put("type", "RCPT").put("kind", "DELIVERED").put("id", id)
+                        _incomingMessages.tryEmit(IncomingText(id, remoteHost, localPort, body))
+                        // Ack delivered
+                        val ack = JSONObject()
+                            .put("type", "RCPT")
+                            .put("kind", "DELIVERED")
+                            .put("id", id)
+                            .put("convPort", localPort)
                         sendEnc(wr, session, ack)
                         socket.close()
                     }
@@ -164,10 +144,19 @@ object ChatServer {
                         val kind = obj.optString("kind")
                         val id = obj.optString("id")
                         val at = obj.optLong("at", System.currentTimeMillis())
-                        val host = normalizeHost(socket.inetAddress?.hostAddress) ?: "?"
+
                         when (kind) {
-                            "DELIVERED" -> ChatStore.markDelivered(host, serverPort, id)
-                            "READ" -> ChatStore.markRead(host, serverPort, id, at)
+                            "DELIVERED" -> ChatStore.markDelivered(remoteHost, serverPort, id)
+                            "READ" -> {
+                                ChatStore.markRead(remoteHost, serverPort, id, at)
+                                // Also try other ports for same host (best-effort)
+                                runCatching {
+                                    dev.alsatianconsulting.transportchat.data.ChatStore
+                                        .listOpenChats()
+                                        .filter { (h, p) -> h == remoteHost && p != serverPort }
+                                        .forEach { (_, p) -> ChatStore.markRead(remoteHost, p, id, at) }
+                                }
+                            }
                         }
                         socket.close()
                     }
@@ -176,71 +165,130 @@ object ChatServer {
                         val size = obj.optLong("size", -1L)
                         val mime = obj.optString("mime").ifBlank { null }
                         val id = TransferCenter.newId()
-                        val host = normalizeHost(socket.inetAddress?.hostAddress) ?: "?"
 
-                        // NEW: DEFENSIVE BLOCK CHECK — don't accept offers from blocked peers
-                        val stillBlocked = runBlocking { PeerStore(appCtx).isBlocked(host, serverPort) }
-                        if (stillBlocked) {
-                            Log.i(TAG, "Blocked file offer from $host:$serverPort — closing")
+                        if (dev.alsatianconsulting.transportchat.store.PeerStore(appCtx).isBlocked(remoteHost, localPort)) {
+                            Log.i(TAG, "Blocked file offer from $remoteHost:$localPort — closing")
                             runCatching { socket.close() }
                             return@launch
                         }
 
-                        TransferCenter.startIncoming(id, host, serverPort, name, mime, size)
                         pending[id] = PendingConn(socket, br, wr, session, name, mime, size)
-                        _incomingFileOffers.emit(
-                            IncomingFileOffer(id, host, serverPort, name, mime, size)
+                        TransferCenter.startIncoming(id, remoteHost, localPort, name, mime, size)
+                        _incomingFileOffers.tryEmit(
+                            IncomingFileOffer(id, remoteHost, localPort, name, mime, size)
                         )
-                        // NOTE: Do not close; waiting for accept/reject.
+                        // keep socket open for accept/reject
                     }
                     else -> socket.close()
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "Handle error: ${t.message}")
-                runCatching { socket.close() }
             }
         }
     }
 
     private fun sendEnc(wr: OutputStreamWriter, session: ChatCrypto.Session, obj: JSONObject) {
-        val b64 = ChatCrypto.encryptToB64(session, obj.toString().toByteArray())
-        wr.write("ENC\n"); wr.write(b64 + "\n"); wr.flush()
+        runCatching {
+            wr.write("ENC\n")
+            wr.write(ChatCrypto.encryptToB64(session, obj.toString().toByteArray()))
+            wr.write("\n")
+            wr.flush()
+        }
     }
 
-    /** UI accepted: tell sender (encrypted), then receive encrypted chunks. */
+    /** UI accepted offer; stream to the chosen location with timeouts & progress. */
     fun acceptOffer(id: String, saveUri: Uri) {
         val p = pending.remove(id) ?: return
+        // track as active so the UI can cancel
+        active[id] = p
         scope.launch {
             try {
+                // Inform sender we accept (encrypted)
                 sendEnc(p.wr, p.session, JSONObject().put("type", "FILE_REPLY").put("decision", "ACCEPT"))
-                // Expect "DATA", then many "CHUNK\n<base64>\n", then "END"
-                val first = p.br.readLine() ?: return@launch
-                if (first != "DATA") return@launch
+
+                // 30s idle timeout waiting for DATA and between frames
+                p.socket.soTimeout = 30_000
+
+                // Expect "DATA"
+                val first = try { p.br.readLine() } catch (t: SocketTimeoutException) { null }
+                if (first == null) {
+                    TransferCenter.failed(id, "Timeout waiting for data")
+                    runCatching { p.socket.close() }
+                    return@launch
+                }
+                if (first != "DATA") {
+                    TransferCenter.failed(id, "Protocol error (expected DATA)")
+                    runCatching { p.socket.close() }
+                    return@launch
+                }
 
                 var copied = 0L
+                var peerCancelled = false
+
                 appCtx.contentResolver.openOutputStream(saveUri)?.use { out ->
                     while (true) {
-                        val tag = p.br.readLine() ?: break
-                        if (tag == "END") break
-                        if (tag != "CHUNK") break
-                        val b64 = p.br.readLine() ?: break
-                        val plain = ChatCrypto.decryptFromB64(p.session, b64)
-                        out.write(plain)
-                        copied += plain.size
-                        TransferCenter.progress(id, copied)
+                        // If local user requested cancel, stop by closing the socket
+                        if (TransferCenter.isCancelled(id)) {
+                            runCatching {
+                                // Tell the sender we are cancelling before closing.
+                                p.wr.write("CANCEL\n")
+                                p.wr.flush()
+                            }
+                            runCatching { p.socket.close() }
+                            break
+                        }
+                        val tag = try { p.br.readLine() } catch (t: SocketTimeoutException) { null } ?: break
+                        when (tag) {
+                            "CHUNK" -> {
+                                val b64 = try { p.br.readLine() } catch (t: SocketTimeoutException) { null } ?: break
+                                val clear = ChatCrypto.decryptFromB64(p.session, b64)
+                                val bytes = if (clear is ByteArray) clear else clear.toString().toByteArray()
+                                out.write(bytes)
+                                copied += bytes.size
+                                TransferCenter.progress(id, copied)
+                            }
+                            "END" -> break
+                            "CANCEL" -> {
+                                peerCancelled = true
+                                break
+                            }
+                            else -> {
+                                TransferCenter.failed(id, "Protocol error ($tag)")
+                                runCatching { p.socket.close() }
+                                return@launch
+                            }
+                        }
                     }
-                    out.flush()
+                    runCatching { out.flush() }
                 }
-                TransferCenter.finishedIncoming(id, saveUri)
+
+                when {
+                    TransferCenter.isCancelled(id) -> {
+                        TransferCenter.cancelled(id)
+                    }
+                    peerCancelled -> {
+                        TransferCenter.cancelled(id)
+                    }
+                    else -> {
+                        TransferCenter.finishedIncoming(id, saveUri)
+                        // Optional ack back to sender (encrypted)
+                        sendEnc(p.wr, p.session, JSONObject().put("type", "FILE_ACK").put("status", "OK"))
+                    }
+                }
             } catch (t: Throwable) {
-                TransferCenter.failed(id, t.message)
+                if (TransferCenter.isCancelled(id)) {
+                    TransferCenter.cancelled(id)
+                } else {
+                    TransferCenter.failed(id, t.message)
+                }
             } finally {
+                active.remove(id)
                 runCatching { p.socket.close() }
             }
         }
     }
 
-    /** UI rejected: inform sender (encrypted) and close. */
+    /** UI rejected offer (unchanged) */
     fun rejectOffer(id: String) {
         val p = pending.remove(id) ?: return
         scope.launch {
@@ -249,6 +297,37 @@ object ChatServer {
             }
             TransferCenter.rejected(id)
             runCatching { p.socket.close() }
+        }
+    }
+
+    /**
+     * Cancel an in-progress incoming transfer from the receiver side.
+     *
+     * Surgical fix: inform the sender by writing a plain "CANCEL" line
+     * before closing, so the sender can mark the transfer as CANCELLED
+     * instead of treating it as a generic failure.
+     */
+    fun cancelTransfer(id: String) {
+        // mark as cancelled for UI immediately
+        TransferCenter.requestCancel(id)
+
+        // If there is an active receive connection, notify the peer first.
+        active[id]?.let { conn ->
+            runCatching {
+                conn.wr.write("CANCEL\n")
+                conn.wr.flush()
+            }.onFailure {
+                Log.d(TAG, "Failed to notify sender of cancel (will close anyway): ${it.message}")
+            }
+        }
+
+        // Close any active socket to interrupt readLine()
+        active.remove(id)?.let { conn ->
+            runCatching { conn.socket.close() }
+        }
+        // if it was still pending (not yet accepted), just drop it
+        pending.remove(id)?.let { conn ->
+            runCatching { conn.socket.close() }
         }
     }
 }
