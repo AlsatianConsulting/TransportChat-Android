@@ -1,0 +1,1 @@
+LAN-only encrypted chat. No servers.

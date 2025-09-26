@@ -1,0 +1,51 @@
+Welcome to TransportChat — a LAN-only messenger built for speed and privacy. This first release focuses on dependable local messaging, zero servers, and a clean, dark UI.
+
+Core features
+
+Local-only chat (no internet required): Devices on the same Wi-Fi or hotspot discover each other automatically and exchange messages directly.
+
+End-to-end encryption in transit: Message content is encrypted between participants. No central servers, accounts, or phone numbers.
+
+One-to-one messaging: Timestamps, optional read receipts, and smooth scrolling for long chats.
+
+File & image sharing: Send photos, screenshots, and files across your LAN.
+
+Ephemeral by default: Chats clear when the app closes unless you choose to export.
+
+Quick actions in chat: Rename chat, Export chat, Clear chat, Block user.
+
+Usability
+
+Link support & copy: Tap to open links; long-press a message to copy text.
+
+Smart names: The peers list updates to a contact’s broadcasted name unless you’ve set a nickname. Reset restores the network name.
+
+Dark mode UI: Minimal, high-contrast layout that stays out of your way.
+
+Exports & visibility
+
+Chat export: Save a conversation (and file metadata) to local storage when you need a record.
+
+Transfer status: Clear “file received” / “transfer complete” messages for confidence on large sends.
+
+Privacy & data
+
+No data collection: No analytics, ads, or tracking SDKs.
+
+Local storage only: Any exports or received files are saved on your device under your control.
+
+Permissions (purpose-limited)
+
+Network/Wi-Fi: Discover peers and send/receive messages.
+
+Notifications: Alert you to new messages.
+
+Files/Media (scoped): Attach or save content you choose.
+
+Camera/Microphone (optional): Only used when you attach/record media.
+
+Tips
+
+All devices must be on the same LAN/hotspot. Some “guest” networks block peer-to-peer; use a standard SSID or personal hotspot if peers aren’t visible.
+
+Large file speeds depend on your local network quality
