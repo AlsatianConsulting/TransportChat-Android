@@ -188,7 +188,7 @@ private fun MainScreen() {
                     }
                 }
 
-                // Change Name dialog
+                // Change Name dialog (local device)
                 if (changeNameOpen) {
                     var newName by remember { mutableStateOf(myDisplay) }
                     AlertDialog(
@@ -212,8 +212,22 @@ private fun MainScreen() {
                                 changeNameOpen = false
                             }) { Text("Save") }
                         },
+                        // ADD: Reset button alongside Cancel to revert to default (network-derived) by clearing override
                         dismissButton = {
-                            TextButton(onClick = { changeNameOpen = false }) { Text("Cancel") }
+                            Row {
+                                TextButton(onClick = {
+                                    // Clear override; re-register with AppSettings.displayName (or default derivation)
+                                    nameOverride = null
+                                    if (online) nsdController.reRegister(
+                                        (displayName).ifBlank { "Device-${Build.MODEL ?: "Android"}" },
+                                        myPort,
+                                        selfIps
+                                    )
+                                    changeNameOpen = false
+                                }) { Text("Reset") }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(onClick = { changeNameOpen = false }) { Text("Cancel") }
+                            }
                         }
                     )
                 }
@@ -329,6 +343,7 @@ private fun MainScreen() {
         }
     }
 
+    // Rename dialog for a peer
     if (nsdController.renameOpen) {
         AlertDialog(
             onDismissRequest = { nsdController.renameOpen = false },
@@ -344,8 +359,17 @@ private fun MainScreen() {
             confirmButton = {
                 TextButton(onClick = { nsdController.applyRename() }) { Text("Save") }
             },
+            // Keep Cancel; Save logic unchanged. Reset for peer nickname is handled by clearing text and saving.
             dismissButton = {
-                TextButton(onClick = { nsdController.renameOpen = false }) { Text("Cancel") }
+                Row {
+                    TextButton(onClick = {
+                        // Clear nickname to revert to advertised network name
+                        nsdController.renameText = ""
+                        nsdController.applyRename()
+                    }) { Text("Reset") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { nsdController.renameOpen = false }) { Text("Cancel") }
+                }
             }
         )
     }
@@ -502,9 +526,14 @@ private class NsdController(private val appCtx: Context) {
     fun showRenameFor(host: String, port: Int, current: String) {
         renameHost = host; renamePort = port; renameText = current; renameOpen = true
     }
+
+    // Allow clearing nickname (blank) to revert to advertised name
     fun applyRename() {
         val h = renameHost; val p = renamePort; val newName = renameText.trim()
-        if (!h.isNullOrBlank() && p != null && newName.isNotEmpty()) NicknameCache.set(h, p, newName)
+        if (!h.isNullOrBlank() && p != null) {
+            // If newName is blank, we store a blank label; UI falls back to advertised name.
+            NicknameCache.set(h, p, newName)
+        }
         renameOpen = false
     }
 
@@ -571,12 +600,20 @@ private class NsdController(private val appCtx: Context) {
                     val rawName = resolved.serviceName ?: "$host:$port"
                     val isSelf = (registeredName != null && rawName == registeredName)
                     val name = rawName.removePrefix("TransportChat-")
-                    peers["$host:$port"] = Peer(key = "$host:$port", name = name, host = host, port = port, isSelf = isSelf)
 
-                    // Backfill nickname from discovery if none is set yet (do not overwrite user custom names)
+                    // Capture previous advertised name before updating the map
+                    val id = "$host:$port"
+                    val previousAdvertised = peers[id]?.name
+
+                    // Update current advertised entry
+                    peers[id] = Peer(key = id, name = name, host = host, port = port, isSelf = isSelf)
+
+                    // Sync nickname store with advertised name ONLY if it looks app-generated
+                    // (blank or equal to previous advertised name). Never overwrite a user-custom nickname.
                     runCatching {
                         val existing = runCatching { NicknameCache.get(host, port) }.getOrNull()
-                        if (existing.isNullOrBlank() && name.isNotBlank()) {
+                        val looksAuto = existing.isNullOrBlank() || (previousAdvertised != null && existing == previousAdvertised)
+                        if (looksAuto && name.isNotBlank()) {
                             NicknameCache.set(host, port, name)
                         }
                     }

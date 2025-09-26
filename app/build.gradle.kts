@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "dev.alsatianconsulting.transportchat"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "dev.alsatianconsulting.transportchat"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35
+        versionCode = 2
+        versionName = "1.5"
     }
 
     buildFeatures {

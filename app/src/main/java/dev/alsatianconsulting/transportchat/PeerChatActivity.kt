@@ -62,6 +62,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
+import androidx.compose.material3.Checkbox // <-- ADDED
 
 // ---- Back-compat shims for TaskRemovedWatcherService and anyone calling UnreadCenter.clearAll() ----
 fun clearAll() {
@@ -522,7 +523,8 @@ private fun ChatScreen(
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f)
                         )
-                        OutlinedButton(
+                        // CHANGED: make Copy button filled E87722 with white text
+                        Button(
                             onClick = {
                                 // Copy selected message texts in message order
                                 val text = buildString {
@@ -534,12 +536,13 @@ private fun ChatScreen(
                                 Toast.makeText(context, "Copied ${selectedIds.size} message(s)", Toast.LENGTH_SHORT).show()
                                 clearSelection()
                             },
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFFEAEAEA))
+                            colors = ButtonDefaults.buttonColors(containerColor = orange, contentColor = Color.White)
                         ) { Text("Copy") }
                         Spacer(Modifier.width(8.dp))
-                        OutlinedButton(
+                        // CHANGED: make Cancel button filled E87722 with white text
+                        Button(
                             onClick = { clearSelection() },
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFFEAEAEA))
+                            colors = ButtonDefaults.buttonColors(containerColor = orange, contentColor = Color.White)
                         ) { Text("Cancel") }
                     }
                 }
@@ -676,17 +679,14 @@ private fun ChatScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = if (line.outgoing) Arrangement.End else Arrangement.Start
                         ) {
-                            // --- bullet indicator in selection mode ---
+                            // --- checkbox indicator in selection mode (replaces bullet) ---
                             if (selectMode) {
                                 val selected = selectedIds.contains(line.id)
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .border(2.dp, orange, CircleShape)
-                                        .background(if (selected) orange else Color.Transparent, CircleShape)
-                                        .clickable { toggleSelect(line.id) }
+                                Checkbox(
+                                    checked = selected,
+                                    onCheckedChange = { toggleSelect(line.id) }
                                 )
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(4.dp))
                             }
                             // ----------------------------------------------
 
@@ -696,16 +696,17 @@ private fun ChatScreen(
                                 tonalElevation = if (line.outgoing) 4.dp else 1.dp,
                                 shape = MaterialTheme.shapes.medium,
                             ) {
-                                // long-press on the bubble to toggle selection
+                                // long-press on the bubble to enter/toggle selection
                                 Column(
                                     modifier = Modifier
-                                        .combinedClickable(
-                                            onClick = { /* ClickableText handles URL taps */ },
-                                            onLongClick = {
-                                                selectMode = true
-                                                toggleSelect(line.id)
-                                            }
-                                        )
+                                        .pointerInput(line.id) {
+                                            detectTapGestures(
+                                                onLongPress = {
+                                                    selectMode = true
+                                                    toggleSelect(line.id)
+                                                }
+                                            )
+                                        }
                                         .padding(horizontal = 12.dp, vertical = 8.dp)
                                         .widthIn(max = 320.dp)
                                 ) {
@@ -805,8 +806,7 @@ private fun ChatScreen(
                                         }
                                         Text(
                                             text = "${humanBytes(t.bytes)} / ${if (t.size > 0) humanBytes(t.size) else "?"}  $etaText",
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
+                                            style = MaterialTheme.typography.labelSmall)
                                         Spacer(Modifier.height(8.dp))
                                         OutlinedButton(
                                             onClick = {
