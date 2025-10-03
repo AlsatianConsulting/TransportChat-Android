@@ -3,8 +3,7 @@
 **Effective date:** September 25, 2025  
 **App:** TransportChat (Android)  
 **Developer/Publisher:** [Alsatian Consulting LLC]  
-**Contact:** [privacy@yourdomain.com]  
-**Website (policy URL):** [https://yourdomain.com/transportchat-privacy]
+**Contact:** [info@alsatian.consulting]  
 
 ---
 
