@@ -608,13 +608,7 @@ private fun ChatScreen(
                                             getContent.launch("*/*")
                                         }
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("Send Location") },
-                                        onClick = {
-                                            attachMenuOpen = false
-                                            requestAndSendLocation(context, host, port)
-                                        }
-                                    )
+
                                 }
                             }
                         }
@@ -1037,10 +1031,6 @@ private fun openUrl(ctx: Context, raw: String) {
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         ctx.startActivity(Intent.createChooser(i, "Open link"))
     }
-}
-
-private fun requestAndSendLocation(ctx: Context, host: String, port: Int) {
-    Toast.makeText(ctx, "Location feature not implemented in this snippet", Toast.LENGTH_SHORT).show()
 }
 
 private fun humanBytes(v: Long): String {
