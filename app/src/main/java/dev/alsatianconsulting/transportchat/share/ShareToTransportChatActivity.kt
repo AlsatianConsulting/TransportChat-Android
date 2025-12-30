@@ -39,6 +39,7 @@ class ShareToTransportChatActivity : ComponentActivity() {
 
         // Ensure app data stores and caches are initialized (mirrors PeerChatActivity)
         AppSettings.init(applicationContext)
+        ChatClient.init(applicationContext)
         // Best-effort init for NicknameCache (no-op if not needed)
         runCatching {
             val cls = NicknameCache::class.java

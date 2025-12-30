@@ -8,6 +8,7 @@ import android.util.Log
 import dev.alsatianconsulting.transportchat.crypto.ChatCrypto
 import dev.alsatianconsulting.transportchat.data.ChatStore
 import dev.alsatianconsulting.transportchat.data.TransferCenter
+import dev.alsatianconsulting.transportchat.store.PeerStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -27,6 +28,19 @@ import android.webkit.MimeTypeMap
 object ChatClient {
     private const val TAG = "ChatClient"
     private const val TIMEOUT = 8000
+    // Allow up to 30s for a recipient to answer a file offer before timing out.
+    private const val FILE_REPLY_TIMEOUT = 30_000
+
+    @Volatile private var appCtx: Context? = null
+
+    fun init(context: Context) {
+        appCtx = context.applicationContext
+    }
+
+    private suspend fun isBlocked(host: String, port: Int): Boolean {
+        val ctx = appCtx ?: return false
+        return runCatching { PeerStore(ctx).isBlocked(host, port) }.getOrDefault(false)
+    }
 
     // ===== Handshake =====
     private data class SessionIO(
@@ -68,6 +82,10 @@ object ChatClient {
 
     // ===== Text =====
     suspend fun sendSecureText(host: String, port: Int, id: String, text: String) = withContext(Dispatchers.IO) {
+        if (isBlocked(host, port)) {
+            Log.i(TAG, "Skipping send to blocked peer $host:$port")
+            return@withContext
+        }
         Log.d(TAG, "Connecting to $host:$port for TEXT ...")
         val io = handshake(host, port)
         val payload = JSONObject().put("type", "TEXT").put("id", id).put("body", text)
@@ -85,6 +103,10 @@ object ChatClient {
 
     // ===== Read receipt =====
     suspend fun sendReadReceipt(host: String, port: Int, id: String, readAtMillis: Long) = withContext(Dispatchers.IO) {
+        if (isBlocked(host, port)) {
+            Log.i(TAG, "Skipping read receipt to blocked peer $host:$port")
+            return@withContext
+        }
         val io = handshake(host, port)
         sendEnc(io, JSONObject()
             .put("type", "RCPT")
@@ -97,6 +119,11 @@ object ChatClient {
 
     // ===== File =====
     suspend fun sendFile(context: Context, host: String, port: Int, uri: Uri) = withContext(Dispatchers.IO) {
+        if (appCtx == null) appCtx = context.applicationContext
+        if (isBlocked(host, port)) {
+            Log.i(TAG, "Skipping file send to blocked peer $host:$port")
+            return@withContext
+        }
         val cr = context.contentResolver
         val (name, size, mime) = queryFileMeta(cr, uri)
 
@@ -105,6 +132,8 @@ object ChatClient {
 
         Log.d(TAG, "Connecting to $host:$port for FILE ...")
         val io = handshake(host, port)
+        // Give the recipient up to 30s to answer the offer (accept/reject).
+        io.s.soTimeout = FILE_REPLY_TIMEOUT
 
         // Offer
         sendEnc(io, JSONObject()

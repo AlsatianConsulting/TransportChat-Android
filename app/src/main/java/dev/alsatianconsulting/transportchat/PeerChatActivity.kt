@@ -109,6 +109,7 @@ class PeerChatActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         AppSettings.init(applicationContext)
+        ChatClient.init(applicationContext)
 
         hostArg = intent.getStringExtra(EXTRA_HOST) ?: ""
         portArg = intent.getIntExtra(EXTRA_PORT, 7777)
@@ -826,7 +827,10 @@ private fun ChatScreen(
                                                 }
                                                 runCatching { context.startActivity(Intent.createChooser(intent, "Open with")) }
                                             },
-                                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFFEAEAEA))
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = Color(0xFFEAEAEA),
+                                                contentColor = Color.Black
+                                            )
                                         ) { Text(text = "Open") }
                                     }
                                 }

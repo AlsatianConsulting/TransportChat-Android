@@ -56,6 +56,7 @@ import dev.alsatianconsulting.transportchat.data.AppSettings
 import dev.alsatianconsulting.transportchat.data.ChatStore
 import dev.alsatianconsulting.transportchat.data.IncomingDispatcher
 import dev.alsatianconsulting.transportchat.data.UnreadCenter
+import dev.alsatianconsulting.transportchat.net.ChatClient
 import dev.alsatianconsulting.transportchat.net.ChatServer
 import dev.alsatianconsulting.transportchat.session.NicknameCache
 import dev.alsatianconsulting.transportchat.ui.theme.TransportChatTheme
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
         ChatServer.init(applicationContext)
         ChatServer.start(AppSettings.listenPortValue)
         IncomingDispatcher.start(applicationContext)
+        ChatClient.init(applicationContext)
 
         if (Build.VERSION.SDK_INT >= 33) {
             if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
@@ -184,6 +186,20 @@ private fun MainScreen() {
                         DropdownMenuItem(
                             text = { Text("Change Port") },
                             onClick = { settingsOpen = false; changePortOpen = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Manual Connect") },
+                            onClick = {
+                                settingsOpen = false
+                                nsdController.manualAddOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("About") },
+                            onClick = {
+                                settingsOpen = false
+                                ctx.startActivity(Intent(ctx, AboutActivity::class.java))
+                            }
                         )
                     }
                 }
