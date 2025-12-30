@@ -1,0 +1,31 @@
+TransportChat Android — Privacy Policy (v1.5.2)
+Last updated: 2025-03-05
+
+Overview
+TransportChat is a LAN-only, peer-to-peer chat and file-transfer app. It does not use any cloud/server component. Messages are kept in memory only and disappear when the app is closed. We do not collect or send any personal data to Alsatian Consulting or third parties.
+
+Data we handle
+- Messages: Held in memory during a session only; cleared when you close the app or clear a chat. Not written to persistent storage.
+- Files: When you receive a file, it is saved to a location you choose. Sent files leave your device only over the local network to the selected peer(s).
+- Display name and port: Stored locally on your device using SharedPreferences.
+- Blocklist and nicknames: Stored locally on your device using Android DataStore. These do not leave your device.
+- Discovery cache and session labels: Ephemeral, memory-only.
+- No accounts, identifiers, analytics, ads, or telemetry are collected or transmitted.
+
+Network and encryption
+- The app communicates only on the local network (LAN) using TCP and mDNS/NSD for discovery. It does not contact external servers.
+- Sessions use ephemeral key exchange and per-session encryption for messages and file transfers.
+
+Permissions
+- INTERNET / ACCESS_NETWORK_STATE / ACCESS_WIFI_STATE: Required for local TCP connections and service discovery.
+- CHANGE_WIFI_MULTICAST_STATE: Required to receive multicast DNS for peer discovery.
+- POST_NOTIFICATIONS (Android 13+): Used to show incoming message/file notifications; content is sanitized to exclude message previews.
+
+Children
+TransportChat is not directed to children under 13. Do not use the app if local laws restrict usage.
+
+Changes to this policy
+We may update this policy in the repository or app; continued use after changes constitutes acceptance.
+
+Contact
+Questions or issues: https://github.com/AlsatianConsulting/TransportChat-Android/issues
