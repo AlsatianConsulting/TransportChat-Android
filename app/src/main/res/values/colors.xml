@@ -1,0 +1,10 @@
+<resources>
+    <color name="black_900">#000000</color>
+    <color name="orange_500">#E87722</color>
+    <color name="orange_400">#F1914B</color>
+    <color name="orange_300">#F5AD78</color>
+    <color name="orange_200">#F8C9A3</color>
+    <color name="orange_100">#FCE7D3</color>
+    <color name="white_100">#FAFAFA</color>
+    <color name="warning_red">#C62828</color>
+</resources>

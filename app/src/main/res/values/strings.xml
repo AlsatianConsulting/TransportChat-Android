@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">TransportChat</string>
+    <string name="notification_channel_name">Transport Service</string>
+    <string name="notification_channel_description">Handles LAN discovery and message receive in background.</string>
+</resources>
